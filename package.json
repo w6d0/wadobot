@@ -1,1 +1,18 @@
+{
+  "name": "discord-achievements-bot",
+  "version": "1.0.0",
+  "description": "Discord bot (discord.js v14) - Achievements channel rename with confirmation and startup log",
+  "main": "index.js",
+  "scripts": {
+    "register-commands": "node ./register-commands.js",
+    "start": "npm run register-commands && node index.js"
+  },
+  "engines": {
+    "node": ">=16.9.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.11.0",
+    "dotenv": "^16.1.4"
+  }
+}
 
