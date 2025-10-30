@@ -12,6 +12,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const https = require('https'); // ✅ HTTPS対応
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
 
 // ----------------------
@@ -28,10 +29,10 @@ try {
     const raw = fs.readFileSync(pfile, 'utf8') || '[]';
     published = JSON.parse(raw);
     for (const p of published) request_map[p.request_number] = p;
-    console.log(`Loaded ${published.length} published items`);
+    console.log(`✅ Loaded ${published.length} published items`);
   }
 } catch (e) {
-  console.error('Failed to load published.json:', e);
+  console.error('❌ Failed to load published.json:', e);
 }
 
 function savePublished() {
@@ -39,7 +40,7 @@ function savePublished() {
     fs.writeFileSync(path.join(__dirname, 'published_backup.json'), JSON.stringify(published, null, 2));
     fs.writeFileSync(path.join(__dirname, 'published.json'), JSON.stringify(published, null, 2));
   } catch (e) {
-    console.error('Failed to save published.json:', e);
+    console.error('❌ Failed to save published.json:', e);
   }
 }
 
@@ -115,7 +116,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Publish a request (mark as published)
+  // Publish a request
   if (url.startsWith('/publish/')) {
     const parts = url.slice('/publish/'.length).split('/');
     const [request_number, author = '', title = '', description = ''] = parts.map(p => decodeURIComponent(p || ''));
@@ -152,25 +153,21 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Default: list queued request ids and map
+  // Default
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ requests: requests.map(r => r.request_number), request_map }));
 });
 
 server.listen(PORT, () => console.log(`🌐 HTTP Health & API server listening on port ${PORT}`));
 
-// --- Added: startup logs to help detect duplicate processes ---
-console.log(`Process started. PID=${process.pid}, cwd=${process.cwd()}`);
-console.log(`Startup timestamp: ${new Date().toISOString()}`);
+console.log(`🟢 Process started (PID=${process.pid})`);
+console.log(`🕒 Startup timestamp: ${new Date().toISOString()}`);
 
 // ----------------------
 // Discord bot part
 // ----------------------
-
 const TOKEN = process.env.BOT_TOKEN;
-if (!TOKEN) {
-  console.error('Environment variable BOT_TOKEN is required. Set it in .env or Render env vars.');
-}
+if (!TOKEN) console.error('❌ BOT_TOKEN missing! Set it in .env or environment variables.');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 client.commands = new Collection();
@@ -184,7 +181,7 @@ if (fs.existsSync(commandsPath)) {
       const command = require(path.join(commandsPath, file));
       if (command.data && command.execute) client.commands.set(command.data.name, command);
     } catch (e) {
-      console.error('Failed to load command', file, e);
+      console.error('❌ Failed to load command', file, e);
     }
   }
 }
@@ -196,18 +193,15 @@ if (fs.existsSync(eventsPath)) {
   for (const file of eventFiles) {
     try {
       const event = require(path.join(eventsPath, file));
-      if (event.once) {
-        client.once(event.name, (...args) => event.execute(client, ...args));
-      } else {
-        client.on(event.name, (...args) => event.execute(client, ...args));
-      }
+      if (event.once) client.once(event.name, (...args) => event.execute(client, ...args));
+      else client.on(event.name, (...args) => event.execute(client, ...args));
     } catch (e) {
-      console.error('Failed to load event', file, e);
+      console.error('❌ Failed to load event', file, e);
     }
   }
 }
 
-// --- Slash Command Interaction Handling ---
+// --- Interaction handling ---
 client.on('interactionCreate', async interaction => {
   try {
     if (!interaction.isChatInputCommand()) return;
@@ -215,42 +209,40 @@ client.on('interactionCreate', async interaction => {
     if (!command) return;
     await command.execute(interaction);
   } catch (err) {
-    console.error('Command execution error:', err);
+    console.error('💥 Command execution error:', err);
     try {
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ content: '実行中にエラーが発生しました。', flags: 64 });
-      } else {
-        await interaction.reply({ content: '実行中にエラーが発生しました。', flags: 64 });
-      }
+      if (interaction.replied || interaction.deferred)
+        await interaction.followUp({ content: '⚠️ 実行中にエラーが発生しました。', flags: 64 });
+      else
+        await interaction.reply({ content: '⚠️ 実行中にエラーが発生しました。', flags: 64 });
     } catch (e) {
-      console.error('Failed to notify user about error:', e);
+      console.error('❌ Failed to notify user about error:', e);
     }
   }
 });
 
-// --- Global Error Handlers ---
-process.on('unhandledRejection', (reason) => console.error('Unhandled Rejection:', reason));
-process.on('uncaughtException', (err) => console.error('Uncaught Exception:', err));
+// --- Error Handlers ---
+process.on('unhandledRejection', reason => console.error('Unhandled Rejection:', reason));
+process.on('uncaughtException', err => console.error('Uncaught Exception:', err));
 
 // --- Login ---
 if (TOKEN) {
-  console.log(`Attempting Discord client.login (PID=${process.pid})`);
+  console.log(`🔐 Attempting Discord client.login (PID=${process.pid})`);
   client.login(TOKEN)
     .then(() => console.log('✅ Discord client login resolved'))
     .catch(err => console.error('❌ Failed to login:', err));
-} else {
-  console.log('BOT_TOKEN not provided; Discord client will not login in this process.');
 }
 
-// --- Self Ping Function (for Render uptime) ---
+// --- Self Ping (Render対策) ---
 const SELF_URL = process.env.SELF_URL || 'https://your-app-name.onrender.com';
 setInterval(() => {
-  http.get(`${SELF_URL}/health`, (res) => {
-    console.log('🔁 Self ping:', res.statusCode);
+  const lib = SELF_URL.startsWith('https') ? https : http;
+  lib.get(`${SELF_URL}/health`, (res) => {
+    console.log(`🔁 Self ping (${SELF_URL}) → ${res.statusCode}`);
   }).on('error', (err) => {
     console.error('⚠️ Self ping failed:', err.message);
   });
-}, 5 * 60 * 1000); // 5分おき
+}, 5 * 60 * 1000);
 
 // --- Ready Event ---
 client.once('ready', () => {
