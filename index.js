@@ -259,3 +259,13 @@ if (TOKEN) {
 } else {
   console.log('BOT_TOKEN not provided; Discord client will not login in this process.');
 }
+
+// === 自己Ping機能 ===
+const SELF_URL = process.env.SELF_URL || 'https://wadobot-nb2l.onrender.com/';
+setInterval(() => {
+  http.get(SELF_URL + '/health', (res) => {
+    console.log('🔁 Self ping:', res.statusCode);
+  }).on('error', (err) => {
+    console.error('⚠️ Self ping failed:', err.message);
+  });
+}, 5 * 60 * 1000); // 5分おき
