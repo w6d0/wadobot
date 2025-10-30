@@ -8,6 +8,32 @@ require('dotenv').config(); // .env を読み込む（ローカル用）。Rende
 const fs = require('fs');
 const path = require('path');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
+const http = require('http');
+
+// 24時間稼働用の最小ヘルスサーバ
+// Render の Web Service としてデプロイする場合は PORT が自動で渡されます。
+// Background Worker に切り替える場合はこのサーバは不要です。
+const PORT = process.env.PORT || 3000;
+http
+  .createServer((req, res) => {
+    if (req.url === '/' || req.url === '/health') {
+      const uptime = Math.floor(process.uptime());
+      const mem = process.memoryUsage();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          status: 'ok',
+          uptime_seconds: uptime,
+          memory_rss_mb: Number((mem.rss / 1024 / 1024).toFixed(2)),
+          timestamp: Date.now(),
+        })
+      );
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+  })
+  .listen(PORT, () => console.log(`Health server listening on port ${PORT}`));
 
 // 必須: BOT_TOKEN（.env または Render 環境変数）
 const TOKEN = process.env.BOT_TOKEN;
