@@ -159,6 +159,10 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => console.log(`Health & API server listening on port ${PORT}`));
 
+// --- Added: startup logs to help detect duplicate processes ---
+console.log(`Process started. PID=${process.pid}, argv=${process.argv.join(' ')}, cwd=${process.cwd()}`);
+console.log(`Startup timestamp: ${new Date().toISOString()}`);
+
 // ----------------------
 // Discord bot part
 // ----------------------
@@ -240,11 +244,18 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
 });
 
-// login if token available
+// --- Added: guarded login with logs to make duplicate-start detection easier ---
+let loginAttempted = false;
 if (TOKEN) {
-  client.login(TOKEN).catch(err => {
-    console.error('Failed to login:', err);
-    // Do not crash the process to keep API alive; decide based on your needs
-    // process.exit(1);
-  });
+  if (!loginAttempted) {
+    loginAttempted = true;
+    console.log(`Attempting Discord client.login (PID=${process.pid})`);
+    client.login(TOKEN)
+      .then(() => console.log('Discord client login resolved'))
+      .catch(err => console.error('Failed to login:', err));
+  } else {
+    console.log('Login already attempted in this process; skipping duplicate login.');
+  }
+} else {
+  console.log('BOT_TOKEN not provided; Discord client will not login in this process.');
 }
