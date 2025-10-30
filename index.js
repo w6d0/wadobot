@@ -261,11 +261,28 @@ if (TOKEN) {
 }
 
 // === 自己Ping機能 ===
-const SELF_URL = process.env.SELF_URL || 'https://wadobot-nb2l.onrender.com/';
+import http from 'http'; // ← httpモジュールの読み込みを忘れずに！
+
+const SELF_URL = process.env.SELF_URL || 'https://wadobot-nb2l.onrender.com';
 setInterval(() => {
-  http.get(SELF_URL + '/health', (res) => {
+  http.get(`${SELF_URL}/health`, (res) => {
     console.log('🔁 Self ping:', res.statusCode);
   }).on('error', (err) => {
     console.error('⚠️ Self ping failed:', err.message);
   });
 }, 5 * 60 * 1000); // 5分おき
+
+// ===============================
+// ✅ Readyイベント（Bot起動時）
+client.once('ready', () => {
+  console.log(`✅ Ready! Logged in as ${client.user.tag}`);
+  client.user.setActivity('✨ わどぼっと 稼働中', { type: 3 });
+});
+
+// ===============================
+// 🌐 Expressサーバー起動
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+  console.log(`🌐 Express API running on port ${PORT}`);
+  console.log(`🔧 Self-ping enabled: ${SELF_URL}/health`);
+});
