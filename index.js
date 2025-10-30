@@ -1,11 +1,12 @@
 /**
  * index.js
- * - dotenv を読み込む（ローカルで .env を使えるように）
- * - commands/ と events/ をロードして Bot を起動
- * - 軽量なヘルス & API サーバ（/health, /request, /check, /publish, /show）
- *
- * NOTE: Puppeteer/ウェブUI自動操作は含めていません（利用規約リスク）。ここでは安全なキュー管理基盤を提供します。
+ * Discord Achievements Bot (discord.js v14)
+ * - .env対応
+ * - commands/・events/ 自動ロード
+ * - HTTPヘルス & APIサーバー
+ * - Self Ping対応（Render等の無料ホスティング対策）
  */
+
 require('dotenv').config();
 
 const fs = require('fs');
@@ -90,7 +91,6 @@ const server = http.createServer((req, res) => {
   // Enqueue a prompt
   if (url.startsWith('/request/')) {
     const prompt = decodeURIComponent(url.slice('/request/'.length));
-    // Basic validation: letters, numbers, spaces and limited punctuation
     if (/^[ a-zA-Z0-9'"\-:\,|\?\.!\_\(\)]*$/.test(prompt) && prompt.length > 0 && prompt.length <= 500) {
       const r = new Request(prompt);
       requests.push(r);
@@ -157,36 +157,31 @@ const server = http.createServer((req, res) => {
   res.end(JSON.stringify({ requests: requests.map(r => r.request_number), request_map }));
 });
 
-server.listen(PORT, () => console.log(`Health & API server listening on port ${PORT}`));
+server.listen(PORT, () => console.log(`🌐 HTTP Health & API server listening on port ${PORT}`));
 
 // --- Added: startup logs to help detect duplicate processes ---
-console.log(`Process started. PID=${process.pid}, argv=${process.argv.join(' ')}, cwd=${process.cwd()}`);
+console.log(`Process started. PID=${process.pid}, cwd=${process.cwd()}`);
 console.log(`Startup timestamp: ${new Date().toISOString()}`);
 
 // ----------------------
 // Discord bot part
 // ----------------------
 
-// BOT_TOKEN is required to run bot features (commands/events)
 const TOKEN = process.env.BOT_TOKEN;
 if (!TOKEN) {
   console.error('Environment variable BOT_TOKEN is required. Set it in .env or Render env vars.');
-  // Do not exit immediately if you want the API server to remain alive without bot.
-  // If you want to stop the process when BOT_TOKEN is missing, uncomment next line:
-  // process.exit(1);
 }
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 client.commands = new Collection();
 
-// load commands
+// --- Load commands ---
 const commandsPath = path.join(__dirname, 'commands');
 if (fs.existsSync(commandsPath)) {
   const commandFiles = fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'));
   for (const file of commandFiles) {
     try {
-      const filePath = path.join(commandsPath, file);
-      const command = require(filePath);
+      const command = require(path.join(commandsPath, file));
       if (command.data && command.execute) client.commands.set(command.data.name, command);
     } catch (e) {
       console.error('Failed to load command', file, e);
@@ -194,20 +189,17 @@ if (fs.existsSync(commandsPath)) {
   }
 }
 
-// load events with clientReady compatibility
+// --- Load events ---
 const eventsPath = path.join(__dirname, 'events');
 if (fs.existsSync(eventsPath)) {
   const eventFiles = fs.readdirSync(eventsPath).filter(f => f.endsWith('.js'));
   for (const file of eventFiles) {
     try {
-      const filePath = path.join(eventsPath, file);
-      const event = require(filePath);
+      const event = require(path.join(eventsPath, file));
       if (event.once) {
         client.once(event.name, (...args) => event.execute(client, ...args));
-        if (event.name === 'ready') client.once('clientReady', (...args) => event.execute(client, ...args));
       } else {
         client.on(event.name, (...args) => event.execute(client, ...args));
-        if (event.name === 'ready') client.on('clientReady', (...args) => event.execute(client, ...args));
       }
     } catch (e) {
       console.error('Failed to load event', file, e);
@@ -215,7 +207,7 @@ if (fs.existsSync(eventsPath)) {
   }
 }
 
-// interaction handling
+// --- Slash Command Interaction Handling ---
 client.on('interactionCreate', async interaction => {
   try {
     if (!interaction.isChatInputCommand()) return;
@@ -236,34 +228,22 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-// global error handlers
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Rejection:', reason);
-});
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-});
+// --- Global Error Handlers ---
+process.on('unhandledRejection', (reason) => console.error('Unhandled Rejection:', reason));
+process.on('uncaughtException', (err) => console.error('Uncaught Exception:', err));
 
-// --- Added: guarded login with logs to make duplicate-start detection easier ---
-let loginAttempted = false;
+// --- Login ---
 if (TOKEN) {
-  if (!loginAttempted) {
-    loginAttempted = true;
-    console.log(`Attempting Discord client.login (PID=${process.pid})`);
-    client.login(TOKEN)
-      .then(() => console.log('Discord client login resolved'))
-      .catch(err => console.error('Failed to login:', err));
-  } else {
-    console.log('Login already attempted in this process; skipping duplicate login.');
-  }
+  console.log(`Attempting Discord client.login (PID=${process.pid})`);
+  client.login(TOKEN)
+    .then(() => console.log('✅ Discord client login resolved'))
+    .catch(err => console.error('❌ Failed to login:', err));
 } else {
   console.log('BOT_TOKEN not provided; Discord client will not login in this process.');
 }
 
-// === 自己Ping機能 ===
-import http from 'http'; // ← httpモジュールの読み込みを忘れずに！
-
-const SELF_URL = process.env.SELF_URL || 'https://wadobot-nb2l.onrender.com';
+// --- Self Ping Function (for Render uptime) ---
+const SELF_URL = process.env.SELF_URL || 'https://your-app-name.onrender.com';
 setInterval(() => {
   http.get(`${SELF_URL}/health`, (res) => {
     console.log('🔁 Self ping:', res.statusCode);
@@ -272,17 +252,8 @@ setInterval(() => {
   });
 }, 5 * 60 * 1000); // 5分おき
 
-// ===============================
-// ✅ Readyイベント（Bot起動時）
+// --- Ready Event ---
 client.once('ready', () => {
   console.log(`✅ Ready! Logged in as ${client.user.tag}`);
   client.user.setActivity('✨ わどぼっと 稼働中', { type: 3 });
-});
-
-// ===============================
-// 🌐 Expressサーバー起動
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🌐 Express API running on port ${PORT}`);
-  console.log(`🔧 Self-ping enabled: ${SELF_URL}/health`);
 });
