@@ -1,19 +1,22 @@
+/**
+ * Achievements.js
+ * 指定したチャンネル名の末尾の数字を任意の数値に変更
+ * - ボタン確認なし（即変更）
+ * - エラーハンドリング・日本語ログ付き
+ */
+
 const {
   SlashCommandBuilder,
   PermissionFlagsBits,
   ChannelType,
   EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  ComponentType,
   MessageFlags,
 } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('achievements')
-    .setDescription('指定したチャンネル名の末尾の数字を1増やす（または数字が無ければ1を追加）')
+    .setDescription('指定したチャンネル名の末尾の数字を指定した数値に変更します')
     .addChannelOption(option =>
       option
         .setName('channel')
@@ -21,97 +24,89 @@ module.exports = {
         .setRequired(true)
         .addChannelTypes(ChannelType.GuildText)
     )
+    .addIntegerOption(option =>
+      option
+        .setName('number')
+        .setDescription('変更後の数字を指定（例：10）')
+        .setRequired(true)
+        .setMinValue(0)
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
   async execute(interaction) {
     const target = interaction.options.getChannel('channel');
+    const newNumber = interaction.options.getInteger('number');
 
+    // --------------------------
+    // チャンネルの有効性チェック
+    // --------------------------
     if (!target || !target.isTextBased()) {
       return interaction.reply({
-        content: 'テキストチャンネルを指定してください。',
+        content: '❌ テキストチャンネルを指定してください。',
         flags: MessageFlags.Ephemeral,
       });
     }
 
     if (!target.manageable) {
       return interaction.reply({
-        content: 'このチャンネルの名前を変更する権限がありません。',
+        content: '⚠️ このチャンネルの名前を変更する権限がありません。',
         flags: MessageFlags.Ephemeral,
       });
     }
 
     const oldName = target.name;
+
+    // --------------------------
+    // 数字を置き換え（なければ追加）
+    // --------------------------
+    let newName;
     const match = oldName.match(/(\d+)(?!.*\d)/);
-    const newName = match
-      ? oldName.slice(0, match.index) + (BigInt(match[1]) + 1n).toString() + oldName.slice(match.index + match[1].length)
-      : oldName + '1';
+    if (match) {
+      newName = oldName.slice(0, match.index) + newNumber.toString() + oldName.slice(match.index + match[1].length);
+    } else {
+      newName = oldName + newNumber;
+    }
 
-    // 🔹 Interactionのタイムアウトを防ぐ
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-    const embed = new EmbedBuilder()
-      .setTitle('チャンネル名変更の確認')
-      .setDescription(`チャンネル名\n${oldName} を\n${newName} に変更しますか？`)
-      .setColor(0x00AE86)
-      .setTimestamp();
-
-    const confirmId = `achieve_confirm_${interaction.id}`;
-    const cancelId = `achieve_cancel_${interaction.id}`;
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(confirmId).setLabel('許可する').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(cancelId).setLabel('キャンセル').setStyle(ButtonStyle.Danger)
-    );
-
-    // defer後なので editReply を使用
-    await interaction.editReply({ embeds: [embed], components: [row] });
-
+    // --------------------------
+    // チャンネル名変更
+    // --------------------------
     try {
-      const reply = await interaction.fetchReply();
-      const filter = i =>
-        i.user.id === interaction.user.id &&
-        (i.customId === confirmId || i.customId === cancelId);
+      await target.setName(newName, `Renamed by ${interaction.user.tag}`);
 
-      const collected = await reply.awaitMessageComponent({
-        filter,
-        componentType: ComponentType.Button,
-        time: 30000,
+      // 実行者への通知
+      await interaction.reply({
+        content: `✅ チャンネル名を **${oldName} → ${newName}** に変更しました。`,
+        flags: MessageFlags.Ephemeral,
       });
 
-      row.components.forEach(c => c.setDisabled(true));
+      console.log(`🟢 ${interaction.user.tag} が ${oldName} を ${newName} に変更しました。`);
 
-      if (collected.customId === cancelId) {
-        const canceled = EmbedBuilder.from(embed)
-          .setColor(0xff0000)
-          .setTitle('キャンセルされました');
-        await collected.update({ embeds: [canceled], components: [row] });
-        return;
+      // --------------------------
+      // BOTログチャンネルへの通知（任意）
+      // --------------------------
+      const logChannelId = process.env.LOG_CHANNEL_ID; // .envで指定できるようにする
+      if (logChannelId) {
+        const logChannel = await interaction.client.channels.fetch(logChannelId).catch(() => null);
+        if (logChannel) {
+          const embed = new EmbedBuilder()
+            .setTitle('🏆 チャンネル名変更')
+            .setDescription(`**${interaction.user.tag}** がチャンネル名を変更しました。`)
+            .addFields(
+              { name: '旧チャンネル名', value: oldName, inline: true },
+              { name: '新チャンネル名', value: newName, inline: true },
+            )
+            .setColor(0x00AE86)
+            .setTimestamp();
+          await logChannel.send({ embeds: [embed] });
+        }
       }
 
-      // ✅ チャンネル名変更処理
-      try {
-        await target.setName(newName, `Renamed by ${interaction.user.tag}`);
-        const done = EmbedBuilder.from(embed)
-          .setColor(0x00ff7f)
-          .setTitle('変更完了')
-          .setDescription(`**${oldName}** を **${newName}** に変更しました。`);
-        await collected.update({ embeds: [done], components: [row] });
-      } catch (err) {
-        console.error('Failed to rename channel:', err);
-        const fail = EmbedBuilder.from(embed)
-          .setColor(0xff0000)
-          .setTitle('変更失敗')
-          .setDescription('チャンネル名の変更に失敗しました。権限を確認してください。');
-        await collected.update({ embeds: [fail], components: [row] });
-      }
     } catch (err) {
-      // ⏱ タイムアウト
-      row.components.forEach(c => c.setDisabled(true));
-      const timed = EmbedBuilder.from(embed)
-        .setColor(0xffa500)
-        .setTitle('タイムアウト')
-        .setDescription('応答がありませんでした。操作をキャンセルしました。');
-      await interaction.editReply({ embeds: [timed], components: [row] }).catch(() => {});
+      console.error('❌ チャンネル名変更失敗:', err);
+      await interaction.reply({
+        content: '⚠️ チャンネル名の変更に失敗しました。ボットに適切な権限があるか確認してください。',
+        flags: MessageFlags.Ephemeral,
+      });
     }
   },
 };
