@@ -46,6 +46,9 @@ module.exports = {
       ? oldName.slice(0, match.index) + (BigInt(match[1]) + 1n).toString() + oldName.slice(match.index + match[1].length)
       : oldName + '1';
 
+    // 🔹 Interactionのタイムアウトを防ぐ
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const embed = new EmbedBuilder()
       .setTitle('チャンネル名変更の確認')
       .setDescription(`チャンネル名\n${oldName} を\n${newName} に変更しますか？`)
@@ -60,21 +63,24 @@ module.exports = {
       new ButtonBuilder().setCustomId(cancelId).setLabel('キャンセル').setStyle(ButtonStyle.Danger)
     );
 
-    // 🔹 変更点：fetchReplyオプション削除 → fetchReply()を手動で実行
-    await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
-    const reply = await interaction.fetchReply();
+    // defer後なので editReply を使用
+    await interaction.editReply({ embeds: [embed], components: [row] });
 
     try {
-      const filter = i => i.user.id === interaction.user.id && (i.customId === confirmId || i.customId === cancelId);
+      const reply = await interaction.fetchReply();
+      const filter = i =>
+        i.user.id === interaction.user.id &&
+        (i.customId === confirmId || i.customId === cancelId);
+
       const collected = await reply.awaitMessageComponent({
         filter,
         componentType: ComponentType.Button,
         time: 30000,
       });
 
-      // キャンセル処理
+      row.components.forEach(c => c.setDisabled(true));
+
       if (collected.customId === cancelId) {
-        row.components.forEach(c => c.setDisabled(true));
         const canceled = EmbedBuilder.from(embed)
           .setColor(0xff0000)
           .setTitle('キャンセルされました');
@@ -82,10 +88,9 @@ module.exports = {
         return;
       }
 
-      // 名前変更処理
+      // ✅ チャンネル名変更処理
       try {
         await target.setName(newName, `Renamed by ${interaction.user.tag}`);
-        row.components.forEach(c => c.setDisabled(true));
         const done = EmbedBuilder.from(embed)
           .setColor(0x00ff7f)
           .setTitle('変更完了')
@@ -93,25 +98,20 @@ module.exports = {
         await collected.update({ embeds: [done], components: [row] });
       } catch (err) {
         console.error('Failed to rename channel:', err);
-        row.components.forEach(c => c.setDisabled(true));
         const fail = EmbedBuilder.from(embed)
           .setColor(0xff0000)
           .setTitle('変更失敗')
           .setDescription('チャンネル名の変更に失敗しました。権限を確認してください。');
         await collected.update({ embeds: [fail], components: [row] });
       }
-
     } catch (err) {
+      // ⏱ タイムアウト
       row.components.forEach(c => c.setDisabled(true));
       const timed = EmbedBuilder.from(embed)
         .setColor(0xffa500)
         .setTitle('タイムアウト')
         .setDescription('応答がありませんでした。操作をキャンセルしました。');
-      try {
-        await interaction.editReply({ embeds: [timed], components: [row] });
-      } catch {
-        // ignore (interaction expired)
-      }
+      await interaction.editReply({ embeds: [timed], components: [row] }).catch(() => {});
     }
   },
 };
