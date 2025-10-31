@@ -1,8 +1,6 @@
 /**
- * Achievements.js
- * 指定したチャンネル名の末尾の数字を任意の数値に変更
- * - ボタン確認なし（即変更）
- * - エラーハンドリング・日本語ログ付き
+ * Achievements.js (修正版)
+ * InteractionAlreadyReplied エラー修正版
  */
 
 const {
@@ -10,7 +8,6 @@ const {
   PermissionFlagsBits,
   ChannelType,
   EmbedBuilder,
-  MessageFlags,
 } = require('discord.js');
 
 module.exports = {
@@ -34,57 +31,33 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
   async execute(interaction) {
+    await interaction.deferReply({ ephemeral: true }); // ✅ 先に応答を保留
+
     const target = interaction.options.getChannel('channel');
     const newNumber = interaction.options.getInteger('number');
 
-    // --------------------------
-    // チャンネルの有効性チェック
-    // --------------------------
     if (!target || !target.isTextBased()) {
-      return interaction.reply({
-        content: '❌ テキストチャンネルを指定してください。',
-        flags: MessageFlags.Ephemeral,
-      });
+      return interaction.editReply('❌ テキストチャンネルを指定してください。');
     }
 
     if (!target.manageable) {
-      return interaction.reply({
-        content: '⚠️ このチャンネルの名前を変更する権限がありません。',
-        flags: MessageFlags.Ephemeral,
-      });
+      return interaction.editReply('⚠️ このチャンネルの名前を変更する権限がありません。');
     }
 
     const oldName = target.name;
-
-    // --------------------------
-    // 数字を置き換え（なければ追加）
-    // --------------------------
-    let newName;
     const match = oldName.match(/(\d+)(?!.*\d)/);
-    if (match) {
-      newName = oldName.slice(0, match.index) + newNumber.toString() + oldName.slice(match.index + match[1].length);
-    } else {
-      newName = oldName + newNumber;
-    }
+    const newName = match
+      ? oldName.slice(0, match.index) + newNumber.toString() + oldName.slice(match.index + match[1].length)
+      : oldName + newNumber;
 
-    // --------------------------
-    // チャンネル名変更
-    // --------------------------
     try {
       await target.setName(newName, `Renamed by ${interaction.user.tag}`);
 
-      // 実行者への通知
-      await interaction.reply({
-        content: `✅ チャンネル名を **${oldName} → ${newName}** に変更しました。`,
-        flags: MessageFlags.Ephemeral,
-      });
-
+      await interaction.editReply(`✅ チャンネル名を **${oldName} → ${newName}** に変更しました。`);
       console.log(`🟢 ${interaction.user.tag} が ${oldName} を ${newName} に変更しました。`);
 
-      // --------------------------
-      // BOTログチャンネルへの通知（任意）
-      // --------------------------
-      const logChannelId = process.env.LOG_CHANNEL_ID; // .envで指定できるようにする
+      // ログチャンネル通知（任意）
+      const logChannelId = process.env.LOG_CHANNEL_ID;
       if (logChannelId) {
         const logChannel = await interaction.client.channels.fetch(logChannelId).catch(() => null);
         if (logChannel) {
@@ -103,10 +76,7 @@ module.exports = {
 
     } catch (err) {
       console.error('❌ チャンネル名変更失敗:', err);
-      await interaction.reply({
-        content: '⚠️ チャンネル名の変更に失敗しました。ボットに適切な権限があるか確認してください。',
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply('⚠️ チャンネル名の変更に失敗しました。ボットに適切な権限があるか確認してください。');
     }
   },
 };
